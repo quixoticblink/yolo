@@ -104,12 +104,25 @@ async def extract_symbols_from_legends(
 ):
     """Extract symbols from legend PDFs in the Symbol library folder."""
     from services.symbol_extractor import extract_symbols_from_legends
+    from pathlib import Path
     
-    symbol_library_path = settings.BASE_DIR.parent / "Symbol library"
-    if not symbol_library_path.exists():
+    # Check multiple possible paths for symbol library
+    possible_paths = [
+        settings.BASE_DIR / "symbol_library",     # Docker mounted path
+        settings.BASE_DIR.parent / "Symbol library",  # Local development path
+        Path("/app/symbol_library"),              # Docker absolute path
+    ]
+    
+    symbol_library_path = None
+    for path in possible_paths:
+        if path.exists():
+            symbol_library_path = path
+            break
+    
+    if not symbol_library_path:
         raise HTTPException(
             status_code=404,
-            detail="Symbol library folder not found"
+            detail=f"Symbol library folder not found. Checked: {[str(p) for p in possible_paths]}"
         )
     
     try:
