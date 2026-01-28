@@ -33,6 +33,8 @@ export default function CanvasViewer({
     const [isDrawing, setIsDrawing] = useState(false);
     const [drawStart, setDrawStart] = useState(null);
     const [tempRect, setTempRect] = useState(null);
+    const [isPanning, setIsPanning] = useState(false);
+    const [lastPanPoint, setLastPanPoint] = useState(null);
 
     // Initialize Fabric canvas
     useEffect(() => {
@@ -59,6 +61,20 @@ export default function CanvasViewer({
 
         handleResize();
         window.addEventListener('resize', handleResize);
+
+        // Mouse wheel zoom
+        canvas.on('mouse:wheel', (opt) => {
+            const delta = opt.e.deltaY;
+            let newZoom = canvas.getZoom() * (delta > 0 ? 0.9 : 1.1);
+            newZoom = Math.min(Math.max(newZoom, 0.1), 5);
+
+            const pointer = canvas.getPointer(opt.e);
+            canvas.zoomToPoint({ x: pointer.x, y: pointer.y }, newZoom);
+            setZoom(newZoom);
+
+            opt.e.preventDefault();
+            opt.e.stopPropagation();
+        });
 
         return () => {
             window.removeEventListener('resize', handleResize);
@@ -206,7 +222,7 @@ export default function CanvasViewer({
 
     }, [annotations, connections, symbols, selectedAnnotation, tool]);
 
-    // Handle drawing tool
+    // Handle drawing tool and panning
     useEffect(() => {
         const canvas = fabricRef.current;
         if (!canvas) return;
@@ -220,7 +236,22 @@ export default function CanvasViewer({
             }
         });
 
+        let panning = false;
+        let lastPosX = 0;
+        let lastPosY = 0;
+
         const handleMouseDown = (opt) => {
+            const e = opt.e;
+
+            // Pan with middle mouse button, space key, or alt key
+            if (e.button === 1 || e.altKey || e.spaceKey) {
+                panning = true;
+                lastPosX = e.clientX;
+                lastPosY = e.clientY;
+                canvas.setCursor('grab');
+                return;
+            }
+
             if (tool !== 'rectangle') return;
 
             const pointer = canvas.getPointer(opt.e);
@@ -244,6 +275,18 @@ export default function CanvasViewer({
         };
 
         const handleMouseMove = (opt) => {
+            // Handle panning
+            if (panning) {
+                const e = opt.e;
+                const vpt = canvas.viewportTransform;
+                vpt[4] += e.clientX - lastPosX;
+                vpt[5] += e.clientY - lastPosY;
+                lastPosX = e.clientX;
+                lastPosY = e.clientY;
+                canvas.requestRenderAll();
+                return;
+            }
+
             if (!isDrawing || !tempRect || !drawStart) return;
 
             const pointer = canvas.getPointer(opt.e);
@@ -261,6 +304,13 @@ export default function CanvasViewer({
         };
 
         const handleMouseUp = () => {
+            // Stop panning
+            if (panning) {
+                panning = false;
+                canvas.setCursor('default');
+                return;
+            }
+
             if (!isDrawing || !tempRect || !drawStart) return;
 
             const bgImage = canvas.getObjects().find(o => o.name === 'backgroundImage');
