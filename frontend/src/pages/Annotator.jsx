@@ -186,6 +186,7 @@ export default function Annotator() {
                     symbols={symbols}
                     selectedSymbol={selectedSymbol}
                     onSelectSymbol={setSelectedSymbol}
+                    onSymbolsExtracted={loadSymbols}
                 />
 
                 {/* Center - Canvas */}

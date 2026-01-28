@@ -1,8 +1,26 @@
 import { useState, useMemo } from 'react';
+import { symbolsApi } from '../services/api';
 
-export default function SymbolPalette({ symbols, selectedSymbol, onSelectSymbol }) {
+export default function SymbolPalette({ symbols, selectedSymbol, onSelectSymbol, onSymbolsExtracted }) {
     const [searchTerm, setSearchTerm] = useState('');
     const [expandedCategories, setExpandedCategories] = useState({});
+
+    const [extracting, setExtracting] = useState(false);
+
+    const handleExtractSymbols = async () => {
+        setExtracting(true);
+        try {
+            const result = await symbolsApi.extractFromLegends();
+            alert(`Extracted ${result.symbols.length} symbols from legend PDFs`);
+            if (onSymbolsExtracted) {
+                onSymbolsExtracted();
+            }
+        } catch (err) {
+            alert('Symbol extraction failed: ' + err.message);
+        } finally {
+            setExtracting(false);
+        }
+    };
 
     // Group symbols by category
     const groupedSymbols = useMemo(() => {
@@ -67,9 +85,17 @@ export default function SymbolPalette({ symbols, selectedSymbol, onSelectSymbol 
             <div style={{ flex: 1, overflow: 'auto' }}>
                 {symbols.length === 0 ? (
                     <div className="sidebar-section">
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                            No symbols extracted yet. Click "Extract Symbols from Legends" on the dashboard.
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: 'var(--spacing-md)' }}>
+                            No symbols extracted yet.
                         </p>
+                        <button
+                            className="btn btn-primary"
+                            onClick={handleExtractSymbols}
+                            disabled={extracting}
+                            style={{ width: '100%' }}
+                        >
+                            {extracting ? '⏳ Extracting...' : '🔧 Extract Symbols from Legends'}
+                        </button>
                     </div>
                 ) : categories.length === 0 ? (
                     <div className="sidebar-section">
