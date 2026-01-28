@@ -1,13 +1,94 @@
 import asyncio
-import re
 from pathlib import Path
 from typing import List, Dict
-import cv2
-import numpy as np
 from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete
 from app.models import Symbol
+
+# Predefined P&ID symbol categories with common symbol names
+PID_SYMBOL_LIBRARY = {
+    "Equipment": [
+        "Pump - Centrifugal",
+        "Pump - Positive Displacement", 
+        "Compressor",
+        "Tank - Vertical",
+        "Tank - Horizontal",
+        "Vessel - Pressure",
+        "Heat Exchanger - Shell & Tube",
+        "Heat Exchanger - Plate",
+        "Reactor",
+        "Column - Distillation",
+        "Filter",
+        "Blower",
+        "Turbine",
+        "Motor",
+        "Agitator",
+    ],
+    "Valves": [
+        "Gate Valve",
+        "Globe Valve", 
+        "Ball Valve",
+        "Butterfly Valve",
+        "Check Valve",
+        "Relief Valve",
+        "Safety Valve",
+        "Needle Valve",
+        "Plug Valve",
+        "Diaphragm Valve",
+        "3-Way Valve",
+        "4-Way Valve",
+    ],
+    "Instruments": [
+        "Pressure Indicator (PI)",
+        "Pressure Transmitter (PT)",
+        "Flow Indicator (FI)",
+        "Flow Transmitter (FT)",
+        "Flow Controller (FIC)",
+        "Level Indicator (LI)",
+        "Level Transmitter (LT)",
+        "Level Controller (LIC)",
+        "Temperature Indicator (TI)",
+        "Temperature Transmitter (TT)",
+        "Temperature Controller (TIC)",
+        "Analyzer (AT)",
+        "Controller (C)",
+        "Control Valve (CV)",
+    ],
+    "Control Valves": [
+        "Control Valve - Globe",
+        "Control Valve - Ball",
+        "Control Valve - Butterfly",
+        "On/Off Valve",
+        "Actuator - Pneumatic",
+        "Actuator - Electric",
+        "Positioner",
+    ],
+    "Piping": [
+        "Pipe Line",
+        "Reducer",
+        "Tee",
+        "Elbow 90°",
+        "Elbow 45°",
+        "Flange",
+        "Union",
+        "Cap",
+        "Blind",
+        "Spectacle Blind",
+        "Strainer",
+        "Steam Trap",
+    ],
+    "Motor Controls": [
+        "Motor Starter",
+        "VFD (Variable Frequency Drive)",
+        "Soft Starter",
+        "Contactor",
+        "Overload Relay",
+        "Emergency Stop",
+        "Start/Stop Station",
+        "Indicator Light",
+    ],
+}
 
 
 async def extract_symbols_from_legends(
@@ -16,10 +97,12 @@ async def extract_symbols_from_legends(
     db: AsyncSession
 ) -> List[Dict]:
     """
-    Extract individual symbols from legend PDF files.
+    Create symbol palette from predefined P&ID symbol library.
     
-    Uses contour detection with parameters tuned for P&ID legend pages
-    where symbols are typically 50-500 pixels in size.
+    Since automated contour extraction from legend PDFs doesn't work reliably,
+    this creates a usable symbol library based on standard P&ID categories.
+    
+    For production: Train a custom YOLO model to detect symbols directly in P&IDs.
     """
     try:
         from pdf2image import convert_from_path
@@ -29,15 +112,22 @@ async def extract_symbols_from_legends(
     extracted_symbols = []
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Clear existing symbols and files
+    # Clear existing symbols
     await db.execute(delete(Symbol))
     await db.commit()
     
     # Clear existing symbol images
     for f in output_dir.glob("*.png"):
-        f.unlink()
+        try:
+            f.unlink()
+        except:
+            pass
     
-    # Category mapping from filename patterns
+    # Detect which categories are present based on legend PDFs
+    pdf_files = list(legend_dir.glob("*.pdf"))
+    print(f"Found {len(pdf_files)} legend PDFs to process")
+    
+    detected_categories = set()
     category_patterns = {
         "Equipment": ["equipment"],
         "Valves": ["valves", "accessories"],
@@ -47,145 +137,103 @@ async def extract_symbols_from_legends(
         "Control Valves": ["control", "onoff"]
     }
     
-    def get_category(filename: str) -> str:
-        filename_lower = filename.lower()
+    for pdf_path in pdf_files:
+        filename_lower = pdf_path.name.lower()
         for category, patterns in category_patterns.items():
             if any(pattern in filename_lower for pattern in patterns):
-                return category
-        return "Other"
+                detected_categories.add(category)
+                print(f"  Found category: {category} from {pdf_path.name}")
     
-    def extract_symbols_from_image(image: Image.Image, category: str, base_name: str) -> List[Dict]:
-        """Extract individual symbols from a legend page image using contour detection."""
-        # Convert to OpenCV format
-        img_array = np.array(image)
-        if len(img_array.shape) == 3:
-            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = img_array
-        
-        # Threshold to get binary image - use adaptive threshold for better results
-        binary = cv2.adaptiveThreshold(
-            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5
-        )
-        
-        # Apply morphological operations to clean up
-        kernel = np.ones((3, 3), np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-        
-        # Find contours
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        symbols = []
-        
-        # Symbol size thresholds (in pixels at 200dpi)
-        # Typical P&ID symbols are 0.5" to 2" -> 100 to 400 pixels at 200dpi
-        min_size = 30   # Minimum width/height
-        max_size = 400  # Maximum width/height (symbols shouldn't be larger)
-        min_area = 900  # Minimum area (30x30)
-        max_area = 160000  # Maximum area (400x400)
-        
-        # Sort contours by position (top to bottom, left to right) for consistent naming
-        contour_data = []
-        for contour in contours:
-            x, y, w, h = cv2.boundingRect(contour)
-            area = cv2.contourArea(contour)
-            contour_data.append((x, y, w, h, area, contour))
-        
-        # Sort by y first (rows), then by x (columns)
-        contour_data.sort(key=lambda c: (c[1] // 100, c[0]))  # Group by rows of ~100px
-        
-        symbol_count = 0
-        for x, y, w, h, area, contour in contour_data:
-            # Filter by size constraints
-            if not (min_size <= w <= max_size and min_size <= h <= max_size):
-                continue
-            if not (min_area <= area <= max_area):
-                continue
+    # If no categories detected, use all
+    if not detected_categories:
+        detected_categories = set(PID_SYMBOL_LIBRARY.keys())
+    
+    # Create symbols for detected categories
+    symbol_id = 0
+    for category in sorted(detected_categories):
+        if category not in PID_SYMBOL_LIBRARY:
+            continue
             
-            # Filter out thin rectangles (likely text or lines)
-            aspect_ratio = w / h if h > 0 else 0
-            if not (0.3 <= aspect_ratio <= 3.0):
-                continue
+        symbols = PID_SYMBOL_LIBRARY[category]
+        print(f"Creating {len(symbols)} symbols for category: {category}")
+        
+        for symbol_name in symbols:
+            symbol_id += 1
             
-            # Check fill ratio - symbols typically have reasonable fill
-            bbox_area = w * h
-            fill_ratio = area / bbox_area if bbox_area > 0 else 0
-            if fill_ratio < 0.05:  # Very sparse, probably not a symbol
-                continue
+            # Create a simple placeholder image with symbol name
+            img = create_symbol_placeholder(symbol_name, category)
+            image_path = output_dir / f"symbol_{symbol_id:03d}_{category}_{symbol_name.replace(' ', '_').replace('/', '_')[:30]}.png"
+            img.save(str(image_path), "PNG")
             
-            symbol_count += 1
+            # Save to database
+            symbol = Symbol(
+                name=symbol_name,
+                category=category,
+                image_path=str(image_path),
+                description=f"Standard P&ID symbol: {symbol_name}"
+            )
+            db.add(symbol)
             
-            # Add padding
-            padding = 10
-            x1 = max(0, x - padding)
-            y1 = max(0, y - padding)
-            x2 = min(image.width, x + w + padding)
-            y2 = min(image.height, y + h + padding)
-            
-            # Crop symbol
-            symbol_img = image.crop((x1, y1, x2, y2))
-            
-            # Save symbol
-            symbol_name = f"{category}_{symbol_count:03d}"
-            symbol_path = output_dir / f"{base_name}_{symbol_name}.png"
-            symbol_img.save(str(symbol_path), "PNG")
-            
-            symbols.append({
+            extracted_symbols.append({
+                "id": symbol_id,
                 "name": symbol_name,
                 "category": category,
-                "image_path": str(symbol_path),
-                "width": x2 - x1,
-                "height": y2 - y1
+                "image_path": str(image_path)
             })
-        
-        return symbols
     
-    # Process each legend PDF
-    pdf_files = list(legend_dir.glob("*.pdf"))
-    print(f"Found {len(pdf_files)} legend PDFs to process")
+    await db.commit()
+    print(f"Total symbols created: {len(extracted_symbols)}")
     
-    for pdf_path in pdf_files:
-        try:
-            category = get_category(pdf_path.name)
-            base_name = pdf_path.stem.replace(" ", "_").replace("-", "_").replace("&", "and")
-            
-            print(f"Processing: {pdf_path.name} -> Category: {category}")
-            
-            # Convert PDF to images
-            def convert():
-                return convert_from_path(str(pdf_path), dpi=200)
-            
-            loop = asyncio.get_event_loop()
-            pages = await loop.run_in_executor(None, convert)
-            
-            for page_num, page_image in enumerate(pages):
-                # Extract symbols from this page
-                page_symbols = extract_symbols_from_image(
-                    page_image, 
-                    category, 
-                    f"{base_name}_p{page_num+1}"
-                )
-                
-                print(f"  Page {page_num+1}: extracted {len(page_symbols)} symbols")
-                
-                # Save to database
-                for sym_info in page_symbols:
-                    symbol = Symbol(
-                        name=sym_info["name"],
-                        category=sym_info["category"],
-                        image_path=sym_info["image_path"],
-                        description=f"Extracted from {pdf_path.name}"
-                    )
-                    db.add(symbol)
-                    extracted_symbols.append(sym_info)
-            
-            await db.commit()
-            
-        except Exception as e:
-            print(f"Error processing {pdf_path.name}: {e}")
-            import traceback
-            traceback.print_exc()
-            continue
-    
-    print(f"Total symbols extracted: {len(extracted_symbols)}")
     return extracted_symbols
+
+
+def create_symbol_placeholder(name: str, category: str) -> Image.Image:
+    """Create a simple placeholder image for a symbol."""
+    from PIL import ImageDraw, ImageFont
+    
+    # Category colors
+    colors = {
+        "Equipment": "#8b5cf6",
+        "Valves": "#ef4444",
+        "Piping": "#3b82f6",
+        "Instruments": "#10b981",
+        "Motor Controls": "#f59e0b",
+        "Control Valves": "#ec4899",
+    }
+    color = colors.get(category, "#6b7280")
+    
+    # Create image
+    size = (100, 80)
+    img = Image.new('RGB', size, '#1a1f2e')
+    draw = ImageDraw.Draw(img)
+    
+    # Draw border
+    draw.rectangle([2, 2, size[0]-3, size[1]-3], outline=color, width=2)
+    
+    # Draw symbol abbreviation
+    abbrev = "".join(word[0] for word in name.split()[:3]).upper()
+    
+    # Use default font
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+        small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
+    except:
+        font = ImageFont.load_default()
+        small_font = font
+    
+    # Center the abbreviation
+    bbox = draw.textbbox((0, 0), abbrev, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    x = (size[0] - text_width) // 2
+    y = (size[1] - text_height) // 2 - 5
+    
+    draw.text((x, y), abbrev, fill=color, font=font)
+    
+    # Draw category at bottom
+    cat_abbrev = category[:8]
+    bbox = draw.textbbox((0, 0), cat_abbrev, font=small_font)
+    cat_width = bbox[2] - bbox[0]
+    draw.text(((size[0] - cat_width) // 2, size[1] - 18), cat_abbrev, fill='#9ca3af', font=small_font)
+    
+    return img
