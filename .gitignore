@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App specific
+backend/storage/documents/*
+backend/storage/rendered/*
+backend/storage/symbols/*
+backend/models/*
+!backend/storage/documents/.gitkeep
+!backend/storage/rendered/.gitkeep
+!backend/storage/symbols/.gitkeep
+!backend/models/.gitkeep
+*.db
+*.sqlite3
+
+# Docker
+.docker/

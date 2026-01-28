@@ -1,0 +1,6 @@
+# Ignore for Docker build
+node_modules/
+dist/
+.git/
+.gitignore
+*.md

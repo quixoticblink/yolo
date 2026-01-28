@@ -1,0 +1,13 @@
+# Ignore for Docker build
+venv/
+__pycache__/
+*.pyc
+*.db
+storage/documents/*
+storage/rendered/*
+storage/symbols/*
+models/*
+.git/
+.gitignore
+*.md
+tests/
