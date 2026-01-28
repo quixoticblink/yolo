@@ -62,10 +62,9 @@ async def get_symbol(
 @router.get("/{symbol_id}/image")
 async def get_symbol_image(
     symbol_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db)
 ):
-    """Get symbol image."""
+    """Get symbol image (public for palette loading)."""
     result = await db.execute(
         select(Symbol).where(Symbol.id == symbol_id)
     )

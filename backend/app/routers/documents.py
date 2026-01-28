@@ -133,10 +133,9 @@ async def list_document_pages(
 async def get_page_image(
     document_id: int,
     page_number: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: AsyncSession = Depends(get_db)
 ):
-    """Get rendered page image."""
+    """Get rendered page image (public for canvas loading)."""
     result = await db.execute(
         select(Page)
         .where(Page.document_id == document_id, Page.page_number == page_number)
