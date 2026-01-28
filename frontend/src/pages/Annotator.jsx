@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { documentsApi, annotationsApi, symbolsApi, exportApi } from '../services/api';
+import { documentsApi, annotationsApi, symbolsApi, exportApi, inferenceApi } from '../services/api';
 import CanvasViewer from '../components/CanvasViewer';
 import SymbolPalette from '../components/SymbolPalette';
 import AnnotationPanel from '../components/AnnotationPanel';
@@ -20,6 +20,7 @@ export default function Annotator() {
     const [selectedAnnotation, setSelectedAnnotation] = useState(null);
     const [tool, setTool] = useState('select'); // select, rectangle, line
     const [loading, setLoading] = useState(true);
+    const [detecting, setDetecting] = useState(false);
 
     useEffect(() => {
         loadDocument();
@@ -135,6 +136,20 @@ export default function Annotator() {
         }
     };
 
+    const handleAutoDetect = async () => {
+        setDetecting(true);
+        try {
+            const result = await inferenceApi.autoAnnotate(id, currentPage);
+            alert(`AI Detection complete! Created ${result.annotations_created} annotations.`);
+            // Reload annotations to show new detections
+            await loadPageAnnotations();
+        } catch (err) {
+            alert('AI Detection failed: ' + err.message);
+        } finally {
+            setDetecting(false);
+        }
+    };
+
     const currentPageData = pages.find(p => p.page_number === currentPage);
 
     if (loading) {
@@ -174,6 +189,14 @@ export default function Annotator() {
                             </button>
                         </div>
                     )}
+                    <button
+                        className="btn btn-secondary"
+                        onClick={handleAutoDetect}
+                        disabled={detecting}
+                        title="Run AI to detect symbols and tag IDs"
+                    >
+                        {detecting ? '🔄 Detecting...' : '🤖 AI Auto-Detect'}
+                    </button>
                     <button className="btn btn-primary" onClick={handleExportXml}>
                         📥 Export XML
                     </button>

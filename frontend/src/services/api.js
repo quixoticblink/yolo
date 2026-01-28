@@ -159,3 +159,21 @@ export const exportApi = {
 
     getYoloFormat: (documentId) => apiRequest(`/export/${documentId}/yolo`),
 };
+
+// Inference API (AI detection)
+export const inferenceApi = {
+    // Preview detection without saving
+    detect: (documentId, pageNumber = 1, confidence = 0.25) =>
+        apiRequest(`/inference/${documentId}/detect?page_number=${pageNumber}&confidence=${confidence}`, {
+            method: 'POST',
+        }),
+
+    // Run detection and create annotations
+    autoAnnotate: (documentId, pageNumber = 1, confidence = 0.25) =>
+        apiRequest(`/inference/${documentId}/auto-annotate?page_number=${pageNumber}&confidence=${confidence}`, {
+            method: 'POST',
+        }),
+
+    // Check if AI models are ready
+    status: () => apiRequest('/inference/status'),
+};

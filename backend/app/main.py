@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .database import init_db, async_session
 from .auth import create_default_admin
-from .routers import auth, documents, annotations, symbols, export
+from .routers import auth, documents, annotations, symbols, export, inference
 
 
 @asynccontextmanager
@@ -36,7 +36,7 @@ app = FastAPI(
 # CORS middleware for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "http://localhost", "http://localhost:80"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,6 +48,7 @@ app.include_router(documents.router)
 app.include_router(annotations.router)
 app.include_router(symbols.router)
 app.include_router(export.router)
+app.include_router(inference.router)
 
 # Serve static files (rendered images, symbols)
 app.mount("/static/rendered", StaticFiles(directory=str(settings.RENDERED_DIR)), name="rendered")
