@@ -65,6 +65,7 @@ async def auto_annotate_document(
     document_id: int,
     page_number: int = 1,
     confidence: float = 0.25,
+    use_ocr: bool = False,  # Disabled by default due to model download time
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -72,7 +73,7 @@ async def auto_annotate_document(
     Run AI detection and automatically create annotations.
     
     Detected symbols are saved as annotations with source='yolo'.
-    Detected text is matched to nearby symbols to populate tag_id.
+    Set use_ocr=true to also extract text (first run downloads ~100MB model).
     """
     from services.yolo_detector import detect_symbols, extract_text_regions
     
@@ -86,8 +87,18 @@ async def auto_annotate_document(
         raise HTTPException(status_code=404, detail="Page not found")
     
     # Run detection
-    symbols = await detect_symbols(page.image_path, confidence)
-    text_regions = await extract_text_regions(page.image_path)
+    try:
+        symbols = await detect_symbols(page.image_path, confidence)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"YOLO detection failed: {str(e)}")
+    
+    # OCR is optional and slow on first run
+    text_regions = []
+    if use_ocr:
+        try:
+            text_regions = await extract_text_regions(page.image_path)
+        except Exception as e:
+            print(f"OCR failed (continuing without): {e}")
     
     # Create annotations for each detected symbol
     created_annotations = []
@@ -95,7 +106,7 @@ async def auto_annotate_document(
         bbox = detection["bbox"]
         
         # Find nearby text (potential tag ID)
-        tag_id = find_nearby_tag(bbox, text_regions)
+        tag_id = find_nearby_tag(bbox, text_regions) if text_regions else None
         
         annotation = Annotation(
             page_id=page.id,
@@ -123,7 +134,8 @@ async def auto_annotate_document(
         "page_number": page_number,
         "annotations_created": len(created_annotations),
         "annotations": created_annotations,
-        "text_detected": len(text_regions)
+        "text_detected": len(text_regions),
+        "ocr_used": use_ocr
     }
 
 
