@@ -64,18 +64,20 @@ async def detect_symbols_in_document(
 async def auto_annotate_document(
     document_id: int,
     page_number: int = 1,
-    confidence: float = 0.25,
-    use_ocr: bool = False,  # Disabled by default due to model download time
+    confidence: float = 0.5,
+    use_ocr: bool = True,  # Enabled by default to extract tag IDs
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Run AI detection and automatically create annotations.
     
-    Detected symbols are saved as annotations with source='yolo'.
-    Set use_ocr=true to also extract text (first run downloads ~100MB model).
+    - Detects symbols using AWS Faster R-CNN
+    - Matches symbols to library using Siamese network
+    - Extracts text (tag IDs) using OCR and associates with nearby symbols
     """
     from services.yolo_detector import detect_symbols, extract_text_regions
+    from ..models import Symbol
     
     # Get page
     result = await db.execute(
@@ -86,42 +88,66 @@ async def auto_annotate_document(
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
     
-    # Run detection
-    try:
-        symbols = await detect_symbols(page.image_path, confidence)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"YOLO detection failed: {str(e)}")
+    # Get all symbols from DB for matching
+    symbols_result = await db.execute(select(Symbol))
+    db_symbols = {s.name.lower(): s.id for s in symbols_result.scalars().all()}
     
-    # OCR is optional and slow on first run
+    # Run symbol detection
+    try:
+        detected_symbols = await detect_symbols(page.image_path, confidence)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Symbol detection failed: {str(e)}")
+    
+    # Run OCR for text/tag extraction
     text_regions = []
     if use_ocr:
         try:
             text_regions = await extract_text_regions(page.image_path)
+            print(f"OCR extracted {len(text_regions)} text regions")
         except Exception as e:
             print(f"OCR failed (continuing without): {e}")
     
     # Create annotations for each detected symbol
     created_annotations = []
-    for detection in symbols:
+    for detection in detected_symbols:
         bbox = detection["bbox"]
+        class_name = detection.get("class_name", "symbol")
+        
+        # Find matching symbol_id from database
+        symbol_id = None
+        # Try exact match first
+        if class_name.lower() in db_symbols:
+            symbol_id = db_symbols[class_name.lower()]
+        else:
+            # Try partial match
+            for sym_name, sym_id in db_symbols.items():
+                if class_name.lower() in sym_name or sym_name in class_name.lower():
+                    symbol_id = sym_id
+                    break
         
         # Find nearby text (potential tag ID)
         tag_id = find_nearby_tag(bbox, text_regions) if text_regions else None
         
         annotation = Annotation(
             page_id=page.id,
+            symbol_id=symbol_id,
             x=bbox["x"],
             y=bbox["y"],
             width=bbox["width"],
             height=bbox["height"],
             tag_id=tag_id,
             confidence=detection["confidence"],
-            source="yolo",
-            attributes={"class_name": detection["class_name"]}
+            source="aws",
+            created_by=current_user.id,
+            attributes={
+                "class_name": class_name,
+                "embedding_distance": detection.get("embedding_distance", 0)
+            }
         )
         db.add(annotation)
         created_annotations.append({
-            "class_name": detection["class_name"],
+            "class_name": class_name,
+            "symbol_id": symbol_id,
             "confidence": detection["confidence"],
             "tag_id": tag_id,
             "bbox": bbox
