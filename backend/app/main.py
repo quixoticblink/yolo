@@ -19,6 +19,21 @@ async def lifespan(app: FastAPI):
     async with async_session() as db:
         await create_default_admin(db)
     
+    # Preload AI models in background to avoid timeout on first request
+    import asyncio
+    from services.yolo_detector import get_aws_models
+    
+    def load_models():
+        print("Starting background model loading...")
+        try:
+            get_aws_models()
+            print("Background model loading complete!")
+        except Exception as e:
+            print(f"Background model loading failed: {e}")
+
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, load_models)
+    
     yield
     
     # Shutdown

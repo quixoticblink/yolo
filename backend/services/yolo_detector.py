@@ -116,14 +116,13 @@ async def detect_symbols(
     Returns:
         List of detections with bounding boxes and class info
     """
-    models = get_aws_models()
-    
-    if models is None:
-        # Fallback to empty if model not available
-        print("AWS models not available, returning empty detections")
-        return []
-    
     def run_inference():
+        # Load models inside the thread to avoid blocking event loop
+        models = get_aws_models()
+        if models is None:
+            print("AWS models not available, returning empty detections")
+            return []
+
         # Load and preprocess image
         img = Image.open(image_path).convert("RGB")
         img_array = np.array(img).astype(np.float32) / 255.0

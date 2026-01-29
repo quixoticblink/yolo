@@ -15,7 +15,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir pdf2image opencv-python-headless
 
-# Copy application code
+# Pre-download EasyOCR models to cache them in the image
+RUN python3 -c "import easyocr; easyocr.Reader(['en'], gpu=False)"
+
+# Copy application code (including models filtered by .dockerignore)
 COPY . .
 
 # Create storage directories

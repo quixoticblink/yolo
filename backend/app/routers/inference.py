@@ -115,15 +115,28 @@ async def auto_annotate_document(
         
         # Find matching symbol_id from database
         symbol_id = None
-        # Try exact match first
-        if class_name.lower() in db_symbols:
-            symbol_id = db_symbols[class_name.lower()]
+        
+        # Normalize class name for matching (AWS uses underscores, DB uses spaces)
+        search_name = class_name.lower().replace("_", " ").replace(".png", "")
+        
+        # Try exact match with normalized name
+        if search_name in db_symbols:
+            symbol_id = db_symbols[search_name]
         else:
-            # Try partial match
-            for sym_name, sym_id in db_symbols.items():
-                if class_name.lower() in sym_name or sym_name in class_name.lower():
-                    symbol_id = sym_id
-                    break
+            # Try matching by base name (e.g. "Gate Valve 001" -> "Gate Valve")
+            # This helps if we have generic symbols in DB but specific ones from AWS
+            base_name = search_name
+            if any(char.isdigit() for char in base_name):
+                base_name = "".join([i for i in base_name if not i.isdigit()]).strip()
+                if base_name in db_symbols:
+                    symbol_id = db_symbols[base_name]
+            
+            # Fallback to partial match
+            if not symbol_id:
+                for sym_name, sym_id in db_symbols.items():
+                    if search_name in sym_name or sym_name in search_name:
+                        symbol_id = sym_id
+                        break
         
         # Find nearby text (potential tag ID)
         tag_id = find_nearby_tag(bbox, text_regions) if text_regions else None
@@ -165,37 +178,88 @@ async def auto_annotate_document(
     }
 
 
-def find_nearby_tag(bbox: dict, text_regions: list, max_distance: int = 100) -> Optional[str]:
+def find_nearby_tag(bbox: dict, text_regions: list, max_distance: int = 200) -> Optional[str]:
     """
-    Find a tag ID text region near a symbol bounding box.
+    Find a tag ID text region near or inside a symbol bounding box.
     
-    Looks for instrument/equipment tags within max_distance pixels
-    of the symbol, preferring tags above or to the right of the symbol.
+    Search priority:
+    1. Text overlapping with the symbol bbox
+    2. Text directly above the symbol
+    3. Text to the right of the symbol
+    4. Any nearby text within max_distance
     """
-    symbol_center_x = bbox["x"] + bbox["width"] / 2
-    symbol_center_y = bbox["y"] + bbox["height"] / 2
+    import re
     
-    best_tag = None
-    best_distance = float("inf")
+    symbol_x1, symbol_y1 = bbox["x"], bbox["y"]
+    symbol_x2 = symbol_x1 + bbox["width"]
+    symbol_y2 = symbol_y1 + bbox["height"]
+    symbol_center_x = (symbol_x1 + symbol_x2) / 2
+    symbol_center_y = (symbol_y1 + symbol_y2) / 2
+    
+    candidates = []
     
     for text in text_regions:
-        # Only consider instrument/equipment tags
-        if text["type"] not in ["instrument_tag", "equipment_tag"]:
+        text_bbox = text["bbox"]
+        text_x1, text_y1 = text_bbox["x"], text_bbox["y"]
+        text_x2 = text_x1 + text_bbox["width"]
+        text_y2 = text_y1 + text_bbox["height"]
+        text_center_x = (text_x1 + text_x2) / 2
+        text_center_y = (text_y1 + text_y2) / 2
+        
+        # Skip very short or very long text (unlikely to be a tag)
+        text_content = text["text"].strip()
+        if len(text_content) < 2 or len(text_content) > 20:
             continue
         
-        text_bbox = text["bbox"]
-        text_center_x = text_bbox["x"] + text_bbox["width"] / 2
-        text_center_y = text_bbox["y"] + text_bbox["height"] / 2
+        # Skip pure numbers or very generic text
+        if text_content.isdigit() or text_content.lower() in ["the", "and", "or", "a", "an"]:
+            continue
         
         # Calculate distance
         distance = ((symbol_center_x - text_center_x) ** 2 + 
                    (symbol_center_y - text_center_y) ** 2) ** 0.5
         
-        if distance < max_distance and distance < best_distance:
-            best_distance = distance
-            best_tag = text["text"]
+        if distance > max_distance:
+            continue
+        
+        # Check if text overlaps with symbol
+        overlap_x = max(0, min(symbol_x2, text_x2) - max(symbol_x1, text_x1))
+        overlap_y = max(0, min(symbol_y2, text_y2) - max(symbol_y1, text_y1))
+        overlaps = overlap_x > 0 and overlap_y > 0
+        
+        # Position scoring (prefer text above or to the right)
+        is_above = text_y2 < symbol_y1 + bbox["height"] * 0.3
+        is_right = text_x1 > symbol_x2 - bbox["width"] * 0.3
+        is_tag_pattern = bool(re.match(r'^[A-Z]{1,4}[-_]?\d+[A-Z]?$', text_content.upper()))
+        
+        # Priority score (lower is better)
+        priority = 1000
+        if overlaps:
+            priority = 0
+        elif is_above and is_tag_pattern:
+            priority = 10
+        elif is_right and is_tag_pattern:
+            priority = 20
+        elif is_tag_pattern:
+            priority = 50
+        elif is_above:
+            priority = 100
+        elif is_right:
+            priority = 150
+        
+        candidates.append({
+            "text": text_content,
+            "distance": distance,
+            "priority": priority,
+            "type": text["type"]
+        })
     
-    return best_tag
+    if not candidates:
+        return None
+    
+    # Sort by priority first, then by distance
+    candidates.sort(key=lambda x: (x["priority"], x["distance"]))
+    return candidates[0]["text"]
 
 
 @router.get("/status")

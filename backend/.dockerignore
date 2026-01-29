@@ -1,13 +1,17 @@
-# Ignore for Docker build
-venv/
-__pycache__/
+__pycache__
 *.pyc
-*.db
-storage/documents/*
+*.pyo
+*.pyd
+.Python
+env
+venv
+.env
+*.tar.gz
 storage/rendered/*
+storage/documents/*
 storage/symbols/*
-models/*
-.git/
-.gitignore
-*.md
-tests/
+!storage/rendered/.gitkeep
+!storage/documents/.gitkeep
+!storage/symbols/.gitkeep
+models/model.tar.gz
+models/aws_pid

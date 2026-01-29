@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pid-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Use named volume for persistence instead of bind mount
+      - pid_storage:/app/storage
+    environment:
+      - PYTHONPATH=/app
+      - DEBUG=false
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pid-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pid_storage:
