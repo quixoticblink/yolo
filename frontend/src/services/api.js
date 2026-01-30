@@ -157,7 +157,49 @@ export const exportApi = {
         a.remove();
     },
 
+    downloadYoloTraining: async (documentId) => {
+        const token = getToken();
+        const response = await fetch(`${API_BASE}/export/${documentId}/yolo-training`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+        });
+
+        if (!response.ok) throw new Error('Export failed');
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `document_${documentId}_yolo_dataset.zip`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        a.remove();
+    },
+
+    downloadJson: async (documentId) => {
+        // For JSON, we can just fetch and download or open in new tab
+        const data = await apiRequest(`/export/${documentId}/json`);
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `document_${documentId}_digital_twin.json`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        a.remove();
+    },
+
     getYoloFormat: (documentId) => apiRequest(`/export/${documentId}/yolo`),
+};
+
+// Models API (AI Model Switching)
+export const modelsApi = {
+    list: () => apiRequest('/models'),
+
+    activate: (id) => apiRequest(`/models/${id}/activate`, { method: 'POST' }),
+
+    status: () => apiRequest('/models/status'),
 };
 
 // Inference API (AI detection)

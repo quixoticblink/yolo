@@ -2,6 +2,8 @@
 
 A web application for digitizing Piping and Instrumentation Diagrams (P&ID) and Process Flow Diagrams (PFD) with manual annotation and AI-assisted detection.
 
+# User and Passs - admin / admin123 
+
 ## Features
 
 - ✅ PDF and image upload with multi-page support
@@ -95,14 +97,36 @@ npm run dev
 4. **Assign symbol types** and tag IDs
 5. **Export to XML** for downstream use
 
-## AI Model Integration (Future)
+## AI Model Integration
 
-Download pretrained weights for automatic detection:
+The application uses AWS's pretrained Faster R-CNN + Siamese network for P&ID symbol detection. 
+
+### Docker Build (Automatic)
+
+When building with Docker, models are **automatically downloaded** from AWS GitHub releases (~700MB compressed). No manual action needed:
 
 ```bash
-# AWS P&ID Model
-wget https://github.com/aws-solutions-library-samples/guidance-for-piping-and-instrumentation-diagrams-digitization-on-aws/releases/download/v1.0.0/model.tar.gz
+docker-compose up --build
 ```
+
+### Local Development (Manual)
+
+For local development without Docker, download the models manually:
+
+```bash
+cd backend/models
+
+# Download AWS P&ID Model (contains Faster R-CNN + Siamese weights + reference images)
+curl -L -o model.tar.gz https://github.com/aws-solutions-library-samples/guidance-for-piping-and-instrumentation-diagrams-digitization-on-aws/releases/download/v1.0.0/model.tar.gz
+
+# Extract
+tar -xzf model.tar.gz
+
+# Verify (should see these files)
+ls -la frcnn_checkpoint_50000.pth last-v9.ckpt siamese_lightning.py code/ references/
+```
+
+**Note**: Model files are ~1.4GB and are excluded from git to keep the repository lightweight.
 
 ## License
 

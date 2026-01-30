@@ -98,14 +98,10 @@ async def auto_annotate_document(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Symbol detection failed: {str(e)}")
     
-    # Run OCR for text/tag extraction
-    text_regions = []
-    if use_ocr:
-        try:
-            text_regions = await extract_text_regions(page.image_path)
-            print(f"OCR extracted {len(text_regions)} text regions")
-        except Exception as e:
-            print(f"OCR failed (continuing without): {e}")
+    # Import per-symbol OCR function
+    from services.yolo_detector import extract_tag_from_symbol
+    
+    print(f"Detected {len(detected_symbols)} symbols, running per-symbol OCR...")
     
     # Create annotations for each detected symbol
     created_annotations = []
@@ -138,8 +134,13 @@ async def auto_annotate_document(
                         symbol_id = sym_id
                         break
         
-        # Find nearby text (potential tag ID)
-        tag_id = find_nearby_tag(bbox, text_regions) if text_regions else None
+        # Run per-symbol OCR to extract tag ID from this specific bbox
+        tag_id = None
+        if use_ocr:
+            try:
+                tag_id = await extract_tag_from_symbol(page.image_path, bbox)
+            except Exception as e:
+                print(f"Per-symbol OCR failed for bbox {bbox}: {e}")
         
         annotation = Annotation(
             page_id=page.id,
@@ -173,12 +174,11 @@ async def auto_annotate_document(
         "page_number": page_number,
         "annotations_created": len(created_annotations),
         "annotations": created_annotations,
-        "text_detected": len(text_regions),
         "ocr_used": use_ocr
     }
 
 
-def find_nearby_tag(bbox: dict, text_regions: list, max_distance: int = 200) -> Optional[str]:
+def find_nearby_tag(bbox: dict, text_regions: list, max_distance: int = 350) -> Optional[str]:
     """
     Find a tag ID text region near or inside a symbol bounding box.
     
@@ -211,8 +211,8 @@ def find_nearby_tag(bbox: dict, text_regions: list, max_distance: int = 200) -> 
         if len(text_content) < 2 or len(text_content) > 20:
             continue
         
-        # Skip pure numbers or very generic text
-        if text_content.isdigit() or text_content.lower() in ["the", "and", "or", "a", "an"]:
+        # Skip very generic text (but allow numbers like 4103)
+        if text_content.lower() in ["the", "and", "or", "a", "an"]:
             continue
         
         # Calculate distance
@@ -227,15 +227,21 @@ def find_nearby_tag(bbox: dict, text_regions: list, max_distance: int = 200) -> 
         overlap_y = max(0, min(symbol_y2, text_y2) - max(symbol_y1, text_y1))
         overlaps = overlap_x > 0 and overlap_y > 0
         
+        # Check if text is fully inside the symbol bounding box
+        is_inside = (text_x1 >= symbol_x1 and text_x2 <= symbol_x2 and 
+                     text_y1 >= symbol_y1 and text_y2 <= symbol_y2)
+        
         # Position scoring (prefer text above or to the right)
         is_above = text_y2 < symbol_y1 + bbox["height"] * 0.3
         is_right = text_x1 > symbol_x2 - bbox["width"] * 0.3
-        is_tag_pattern = bool(re.match(r'^[A-Z]{1,4}[-_]?\d+[A-Z]?$', text_content.upper()))
+        is_tag_pattern = bool(re.match(r'^[#]?\d{2,}$|^[A-Z]{1,4}[-_]?\d+[A-Z]?$', text_content.upper()))  # Match #95, 4105, FIC-101
         
         # Priority score (lower is better)
         priority = 1000
-        if overlaps:
+        if is_inside:  # Highest priority: text is inside the symbol box
             priority = 0
+        elif overlaps:
+            priority = 5
         elif is_above and is_tag_pattern:
             priority = 10
         elif is_right and is_tag_pattern:
@@ -267,35 +273,26 @@ async def get_inference_status():
     """
     Check if AI models are loaded and ready.
     """
-    from pathlib import Path
+    from services.yolo_detector import get_model_manager
     
-    models_dir = Path(__file__).parent.parent.parent / "models"
+    manager = get_model_manager()
+    active_model = manager.get_active_model()
     
     status = {
-        "models_dir": str(models_dir),
-        "yolo_ready": False,
-        "ocr_ready": False,
-        "available_models": []
+        "active_model": manager.active_model_name,
+        "available_models": [m["id"] for m in manager.available_models],
+        "model_loaded": active_model is not None,
+        "ocr_ready": False
     }
     
-    # Check for YOLO models
-    if (models_dir / "yolo" / "best.pt").exists():
-        status["available_models"].append("custom_yolo")
-    if (models_dir / "aws_pid").exists():
-        status["available_models"].append("aws_pid")
-    
-    # Try loading models
+    # Check OCR
     try:
-        from services.yolo_detector import get_yolo_model, get_ocr_reader
-        
-        model = get_yolo_model()
-        status["yolo_ready"] = model is not None
-        status["yolo_classes"] = len(model.names) if model else 0
-        
-        ocr = get_ocr_reader()
-        status["ocr_ready"] = ocr is not None
-        
+        import easyocr
+        # Just check if we can instantiate or if library is present
+        status["ocr_ready"] = True
+    except ImportError:
+        status["ocr_ready"] = False
     except Exception as e:
-        status["error"] = str(e)
+        status["ocr_error"] = str(e)
     
     return status

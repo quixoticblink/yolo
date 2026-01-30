@@ -24,7 +24,8 @@ export default function CanvasViewer({
     onAnnotationSelect,
     onAnnotationCreate,
     onAnnotationUpdate,
-    onConnectionCreate
+    onConnectionCreate,
+    showAnnotations = true  // Toggle visibility of annotation boxes
 }) {
     const containerRef = useRef(null);
     const canvasRef = useRef(null);
@@ -148,79 +149,83 @@ export default function CanvasViewer({
         const offsetX = bgImage.left;
         const offsetY = bgImage.top;
 
-        // Draw annotations
-        annotations.forEach(ann => {
-            const symbol = symbols.find(s => s.id === ann.symbol_id);
-            const category = symbol?.category || 'Other';
-            const color = CATEGORY_COLORS[category] || CATEGORY_COLORS['Other'];
+        // Draw annotations (only if showAnnotations is true)
+        if (showAnnotations) {
+            annotations.forEach(ann => {
+                const symbol = symbols.find(s => s.id === ann.symbol_id);
+                const category = symbol?.category || 'Other';
+                const color = CATEGORY_COLORS[category] || CATEGORY_COLORS['Other'];
 
-            const rect = new fabric.Rect({
-                left: offsetX + ann.x * scale,
-                top: offsetY + ann.y * scale,
-                width: ann.width * scale,
-                height: ann.height * scale,
-                fill: 'transparent',
-                stroke: color,
-                strokeWidth: selectedAnnotation?.id === ann.id ? 3 : 2,
-                strokeDashArray: ann.source === 'yolo' ? [5, 5] : null,
-                name: `annotation-${ann.id}`,
-                annotationId: ann.id,
-                selectable: tool === 'select',
-                hasControls: tool === 'select',
-                hasBorders: true,
+                const rect = new fabric.Rect({
+                    left: offsetX + ann.x * scale,
+                    top: offsetY + ann.y * scale,
+                    width: ann.width * scale,
+                    height: ann.height * scale,
+                    fill: 'transparent',
+                    stroke: color,
+                    strokeWidth: selectedAnnotation?.id === ann.id ? 3 : 2,
+                    strokeDashArray: ann.source === 'yolo' ? [5, 5] : null,
+                    name: `annotation-${ann.id}`,
+                    annotationId: ann.id,
+                    selectable: tool === 'select',
+                    hasControls: tool === 'select',
+                    hasBorders: true,
+                });
+
+                // Add label
+                const label = new fabric.Text(ann.tag_id || symbol?.name || `#${ann.id}`, {
+                    left: offsetX + ann.x * scale,
+                    top: offsetY + ann.y * scale - 18,
+                    fontSize: 12,
+                    fill: color,
+                    backgroundColor: 'rgba(15, 20, 25, 0.8)',
+                    padding: 2,
+                    name: `annotation-${ann.id}-label`,
+                    selectable: false,
+                    evented: false
+                });
+
+                canvas.add(rect);
+                canvas.add(label);
+
+                // Click handler
+                rect.on('selected', () => {
+                    onAnnotationSelect(ann);
+                });
             });
+        } // end showAnnotations check
 
-            // Add label
-            const label = new fabric.Text(ann.tag_id || symbol?.name || `#${ann.id}`, {
-                left: offsetX + ann.x * scale,
-                top: offsetY + ann.y * scale - 18,
-                fontSize: 12,
-                fill: color,
-                backgroundColor: 'rgba(15, 20, 25, 0.8)',
-                padding: 2,
-                name: `annotation-${ann.id}-label`,
-                selectable: false,
-                evented: false
+        // Draw connections (only if showAnnotations is true)
+        if (showAnnotations) {
+            connections.forEach(conn => {
+                const fromAnn = annotations.find(a => a.id === conn.from_annotation_id);
+                const toAnn = annotations.find(a => a.id === conn.to_annotation_id);
+                if (!fromAnn || !toAnn) return;
+
+                const fromX = offsetX + (fromAnn.x + fromAnn.width / 2) * scale;
+                const fromY = offsetY + (fromAnn.y + fromAnn.height / 2) * scale;
+                const toX = offsetX + (toAnn.x + toAnn.width / 2) * scale;
+                const toY = offsetY + (toAnn.y + toAnn.height / 2) * scale;
+
+                const line = new fabric.Line([fromX, fromY, toX, toY], {
+                    stroke: conn.line_type === 'signal' ? '#fbbf24' : '#3b82f6',
+                    strokeWidth: 2,
+                    strokeDashArray: conn.line_type === 'signal' ? [5, 5] : null,
+                    name: `connection-${conn.id}`,
+                    selectable: false,
+                    evented: false
+                });
+
+                canvas.add(line);
+                canvas.sendToBack(line);
             });
-
-            canvas.add(rect);
-            canvas.add(label);
-
-            // Click handler
-            rect.on('selected', () => {
-                onAnnotationSelect(ann);
-            });
-        });
-
-        // Draw connections
-        connections.forEach(conn => {
-            const fromAnn = annotations.find(a => a.id === conn.from_annotation_id);
-            const toAnn = annotations.find(a => a.id === conn.to_annotation_id);
-            if (!fromAnn || !toAnn) return;
-
-            const fromX = offsetX + (fromAnn.x + fromAnn.width / 2) * scale;
-            const fromY = offsetY + (fromAnn.y + fromAnn.height / 2) * scale;
-            const toX = offsetX + (toAnn.x + toAnn.width / 2) * scale;
-            const toY = offsetY + (toAnn.y + toAnn.height / 2) * scale;
-
-            const line = new fabric.Line([fromX, fromY, toX, toY], {
-                stroke: conn.line_type === 'signal' ? '#fbbf24' : '#3b82f6',
-                strokeWidth: 2,
-                strokeDashArray: conn.line_type === 'signal' ? [5, 5] : null,
-                name: `connection-${conn.id}`,
-                selectable: false,
-                evented: false
-            });
-
-            canvas.add(line);
-            canvas.sendToBack(line);
-        });
+        } // end showAnnotations check for connections
 
         // Keep background at back
         if (bgImage) canvas.sendToBack(bgImage);
         canvas.renderAll();
 
-    }, [annotations, connections, symbols, selectedAnnotation, tool]);
+    }, [annotations, connections, symbols, selectedAnnotation, tool, showAnnotations]);
 
     // Handle drawing tool and panning
     useEffect(() => {
@@ -252,7 +257,7 @@ export default function CanvasViewer({
                 return;
             }
 
-            if (tool !== 'rectangle') return;
+            if (tool !== 'rectangle' || opt.target) return;
 
             const pointer = canvas.getPointer(opt.e);
             setIsDrawing(true);

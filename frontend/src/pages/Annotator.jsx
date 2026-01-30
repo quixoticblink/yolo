@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { documentsApi, annotationsApi, symbolsApi, exportApi, inferenceApi } from '../services/api';
+import { documentsApi, annotationsApi, symbolsApi, exportApi, inferenceApi, modelsApi } from '../services/api';
 import CanvasViewer from '../components/CanvasViewer';
 import SymbolPalette from '../components/SymbolPalette';
 import AnnotationPanel from '../components/AnnotationPanel';
@@ -21,10 +21,14 @@ export default function Annotator() {
     const [tool, setTool] = useState('select'); // select, rectangle, line
     const [loading, setLoading] = useState(true);
     const [detecting, setDetecting] = useState(false);
+    const [models, setModels] = useState([]);
+    const [activeModelId, setActiveModelId] = useState('');
+    const [showAnnotations, setShowAnnotations] = useState(true);
 
     useEffect(() => {
         loadDocument();
         loadSymbols();
+        loadModels();
     }, [id]);
 
     useEffect(() => {
@@ -55,6 +59,29 @@ export default function Annotator() {
             setSymbols(data);
         } catch (err) {
             console.error('Error loading symbols:', err);
+        }
+    };
+
+    const loadModels = async () => {
+        try {
+            const data = await modelsApi.list();
+            setModels(data);
+            const active = data.find(m => m.active);
+            if (active) setActiveModelId(active.id);
+        } catch (err) {
+            console.error('Error loading models:', err);
+        }
+    };
+
+    const handleModelChange = async (e) => {
+        const newModelId = e.target.value;
+        try {
+            await modelsApi.activate(newModelId);
+            setActiveModelId(newModelId);
+            setModels(models.map(m => ({ ...m, active: m.id === newModelId })));
+            alert(`Switched to model: ${newModelId}`);
+        } catch (err) {
+            alert('Failed to switch model: ' + err.message);
         }
     };
 
@@ -189,6 +216,34 @@ export default function Annotator() {
                             </button>
                         </div>
                     )}
+                    <div style={{ marginRight: 'var(--spacing-sm)' }}>
+                        <select
+                            value={activeModelId}
+                            onChange={handleModelChange}
+                            style={{
+                                padding: '6px 10px',
+                                borderRadius: '4px',
+                                border: '1px solid var(--border-color)',
+                                backgroundColor: 'var(--bg-secondary)',
+                                color: 'var(--text-primary)',
+                                height: '36px'
+                            }}
+                        >
+                            {models.map(m => (
+                                <option key={m.id} value={m.id}>
+                                    {m.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <button
+                        className={`btn ${showAnnotations ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setShowAnnotations(!showAnnotations)}
+                        title="Toggle annotation visibility"
+                        style={{ minWidth: '120px' }}
+                    >
+                        {showAnnotations ? '👁 Hide Boxes' : '👁 Show Boxes'}
+                    </button>
                     <button
                         className="btn btn-secondary"
                         onClick={handleAutoDetect}
@@ -230,6 +285,7 @@ export default function Annotator() {
                             onAnnotationCreate={handleAnnotationCreate}
                             onAnnotationUpdate={handleAnnotationUpdate}
                             onConnectionCreate={handleConnectionCreate}
+                            showAnnotations={showAnnotations}
                         />
                     )}
                 </div>

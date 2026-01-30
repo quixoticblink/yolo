@@ -13,5 +13,12 @@ storage/symbols/*
 !storage/rendered/.gitkeep
 !storage/documents/.gitkeep
 !storage/symbols/.gitkeep
-models/model.tar.gz
+
+# Models are downloaded during Docker build, exclude from COPY
+models/*.pth
+models/*.ckpt
+models/*.tar.gz
 models/aws_pid
+models/references
+models/yolo
+

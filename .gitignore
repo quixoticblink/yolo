@@ -25,17 +25,35 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# App specific
+# App specific - storage
 backend/storage/documents/*
 backend/storage/rendered/*
 backend/storage/symbols/*
-backend/models/*
 !backend/storage/documents/.gitkeep
 !backend/storage/rendered/.gitkeep
 !backend/storage/symbols/.gitkeep
+
+# App specific - models (downloaded during Docker build)
+# These files come from the AWS model tarball (~1.4GB total)
+backend/models/*.pth
+backend/models/*.ckpt
+backend/models/*.tar.gz
+backend/models/references/
+backend/models/yolo/
+backend/models/aws_pid/
+backend/models/code/
+backend/models/siamese_lightning.py
 !backend/models/.gitkeep
+
+# Database
 *.db
 *.sqlite3
 
+# Debug files
+output.json
+output_final.json
+backend/debug_*.py
+
 # Docker
 .docker/
+
